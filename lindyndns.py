@@ -211,7 +211,10 @@ def main():
         pprint(Domain(args.list_dom_resources, '').resources)
         exit(0)
     elif args.update:
-        ip_addr = get_ip(method=args.ip_method, ifname=args.interface)
+        if args.ip == 'auto':
+            ip_addr = get_ip(method=args.ip_method, ifname=args.interface)
+        else:
+            ip_addr = args.ip
         print('Updating dynamic dns to', ip_addr)
         res = Resource.get(args.update[0], args.update[1])[0]
         print('Currently', res)
