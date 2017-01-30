@@ -1,6 +1,7 @@
-#!/usr/bin/python3
+#!/usr/bin/env python3
 import requests
 import json
+import sys
 
 secrets_files = ('./lindyndns.apikey', '/etc/lindyndns.apikey')
 # find an api key, error out if the user forgot to make a file with one
@@ -40,6 +41,10 @@ def get_ip(method='http', ifname=None):
     if method == 'http':
         return requests.get('http://ip.42.pl/raw').content.decode()
     elif method == 'socket':
+        # Only works on Linux!
+        if sys.platform != 'linux':
+            raise EnvironmentError("ip method 'socket' only supported on "
+                                   "Linux!")
         if not ifname:
             raise LinodeException("No interface name provided and using "
                                   "ip method 'socket'!")
@@ -52,6 +57,12 @@ def get_ip(method='http', ifname=None):
             0x8915,  # SIOCGIFADDR
             struct.pack(b'256s', ifname[:15].encode())
         )[20:24])
+    elif method == 'netifaces':
+        if not ifname:
+            raise LinodeException("No interface name provided and using "
+                                  "ip method 'netifaces'!")
+        import netifaces as ni
+        return ni.ifaddresses(ifname)[ni.AF_INET][0]['addr']
 
 
 class LinodeException(Exception):
@@ -188,10 +199,10 @@ def main():
                     type=int, help='Update DNS in this record')
     ap.add_argument('--ip', default='auto', help='Update ip to this. '
                                                  'Default is auto.')
-    ap.add_argument('--ip-method', choices=('http', 'socket'), default='http',
-                    help='Method to get IP address')
-    ap.add_argument('--interface', help='Interface to use to get ip address.'
-                    'Only relevant to socket method.')
+    ap.add_argument('--ip-method', choices=('http', 'socket', 'netifaces'),
+                    default='http', help='Method to get IP address')
+    ap.add_argument('--interface', help='Interface to use to get ip address. '
+                    'Only relevant to socket/netifaces methods.')
 
     if not (len(sys.argv) > 1):
         ap.print_help()
@@ -200,8 +211,8 @@ def main():
     args = ap.parse_args()
 
     if not api_key:
-        print('Please create one of', secrets_files, 'with the contents of your '
-              'linode API key.')
+        print('Please create one of', secrets_files, ' with the contents of '
+              'your linode API key.')
         exit(1)
 
     if args.listdomains:
