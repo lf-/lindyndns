@@ -191,7 +191,7 @@ def main():
     ap = argparse.ArgumentParser(
         description='Simple Linode DNS API client for dynamic dns'
     )
-    ap.add_argument('--listdomains', action='store_true',
+    ap.add_argument('--list-domains', action='store_true',
                     help='List all domains and their IDs')
     ap.add_argument('--list-dom-resources', metavar='domain_id', type=int,
                     help='List resources for a given domain ID')
