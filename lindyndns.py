@@ -215,7 +215,7 @@ def main():
               'your linode API key.')
         exit(1)
 
-    if args.listdomains:
+    if args.list_domains:
         pprint(Domain.list())
         exit(0)
     elif args.list_dom_resources:
