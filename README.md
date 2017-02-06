@@ -11,7 +11,7 @@ lindyndns is a simple dynamic dns client for Linode. The official one is a bit l
 
 ### Run it
     # find your domain
-    lindyndns.py --listdomains
+    lindyndns.py --list-domains
     # find the appropriate resource id
     lindyndns.py --list-dom-resources 12345 #replace 12345 with your actual domain id
     # update it
@@ -19,7 +19,7 @@ lindyndns is a simple dynamic dns client for Linode. The official one is a bit l
 
 ## Usage
 
-    usage: lindyndns.py [-h] [--listdomains] [--list-dom-resources domain_id]
+    usage: lindyndns.py [-h] [--list-domains] [--list-dom-resources domain_id]
                         [--update domain_id resource_id] [--ip IP]
                         [--ip-method {http,socket}] [--interface INTERFACE]
 
@@ -27,7 +27,7 @@ lindyndns is a simple dynamic dns client for Linode. The official one is a bit l
 
     optional arguments:
       -h, --help            show this help message and exit
-      --listdomains         List all domains and their IDs
+      --list-domains         List all domains and their IDs
       --list-dom-resources domain_id
                             List resources for a given domain ID
       --update domain_id resource_id
