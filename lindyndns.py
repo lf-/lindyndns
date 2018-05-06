@@ -18,6 +18,7 @@ else:
 
 API_URL = 'https://api.linode.com/v4'
 
+
 def request(method, endpoint, send_data={}, *args, **kwargs):
     headers = {'Authorization': f'Bearer {api_key}'}
     if send_data:
@@ -32,6 +33,24 @@ def request(method, endpoint, send_data={}, *args, **kwargs):
             data=ret['errors']
         )
     return ret
+
+
+def generate_acme_challenge_records(records):
+    """
+    Make Resource objects for a given set of acme challenge domains
+
+    Parameters:
+    records -- {'example.com': 'aBcD...'} dict where the key is the FQDN to
+               set _acme-challenge on and the value is the value of the TXT
+               record to be set
+    """
+    # "Note that domain names containing wildcards must have the wildcard
+    # component removed in the corresponding TXT record"
+    resources = []
+    for (k, v) in records.items():
+        name = '_acme-challenge.' + k.replace('*.', '')
+        resources.append(Resource(name, 'TXT', v))
+    return resources
 
 
 def get_ip(method='http', ifname=None):
@@ -95,6 +114,23 @@ class Domain:
         self.name = domain
         self.data = kwargs
 
+    def create_resource(self, res):
+        """
+        Create a resource on Linode
+
+        Parameters:
+        res -- resource to create
+
+        Returns:
+        The resource given with all parameters filled from online
+        """
+        print('=====create_resource======')
+        data = res._convert_to_wire_format()
+        print(data)
+        filled_res = request('POST', f'/domains/{self.domain_id}/records', send_data=data)
+        print(filled_res)
+        return Resource(domain_id=self.domain_id, **filled_res)
+
     def __repr__(self):
         return '{d.__class__.__name__}({d.domain_id!r}, ' \
                '{d.name!r})'.format(d=self)
@@ -145,15 +181,13 @@ class Resource:
                '{r.target!r}, resource_id={r.resource_id!r}, ' \
                'domain_id={r.domain_id}, ttl={r.ttl!r})'.format(r=self)
 
-    def update(self):
-        """
-        Send the current version of this Resource to Linode to update it
-        """
+    def _convert_to_wire_format(self):
         ok_fields = {
             'id',
             'type',
             'name',
             'target',
+            'type',
             'priority',
             'weight',
             'port',
@@ -164,7 +198,14 @@ class Resource:
         }
         data = self.__dict__.copy()
         data.update(data['data'])
-        data = {k: v for (k, v) in data.items() if k in ok_fields and v}
+        data['type'] = data['res_type']
+        return {k: v for (k, v) in data.items() if k in ok_fields and v}
+
+    def update(self):
+        """
+        Send the current version of this Resource to Linode to update it
+        """
+        data = self._convert_to_wire_format()
         return request('PUT', f'/domains/{self.domain_id}/records/{self.resource_id}', send_data=data)
 
     def delete(self):
@@ -195,6 +236,13 @@ def main():
                     help='List all domains and their IDs')
     ap.add_argument('--list-dom-resources', metavar='domain_id', type=int,
                     help='List resources for a given domain ID')
+    ap.add_argument(
+        '--acme-challenge',
+        nargs=2,
+        metavar=('domain_id', 'challenges_path'),
+        help='Read the given JSON file following the format in acmebot'
+        'documentation and make appropriate TXT records'
+    )
     ap.add_argument('--update', nargs=2, metavar=('domain_id', 'resource_id'),
                     type=int, help='Update DNS in this record')
     ap.add_argument('--ip', '--value', default='auto', help='Update ip to this. '
@@ -221,8 +269,22 @@ def main():
     elif args.list_dom_resources:
         pprint(Domain(args.list_dom_resources, '').resources)
         exit(0)
-    elif args.set:
-        pass
+    elif args.acme_challenge:
+        dom_id = int(args.acme_challenge[0])
+        challenges_file = args.acme_challenge[1]
+
+        dom = Domain(dom_id, '')
+        existing_resources = [res for res in Resource.get(dom_id) if res.name.startswith('_acme-challenge')]
+        print('Removing existing records:')
+        pprint(existing_resources)
+        for res in existing_resources:
+            res.delete()
+        with open(challenges_file) as h:
+            records = generate_acme_challenge_records(json.load(h))
+        pprint(records)
+        resources = [dom.create_resource(rec) for rec in records]
+        pprint(resources)
+        exit(0)
     elif args.update:
         if args.ip == 'auto':
             ip_addr = get_ip(method=args.ip_method, ifname=args.interface)
@@ -235,6 +297,7 @@ def main():
         print('Will be', res)
         print('Updating...')
         res.update()
+        exit(0)
 
 
 if __name__ == '__main__':
