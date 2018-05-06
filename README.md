@@ -20,6 +20,7 @@ lindyndns is a simple dynamic dns client for Linode. The official one is a bit l
 ## Usage
 
     usage: lindyndns.py [-h] [--list-domains] [--list-dom-resources domain_id]
+                        [--acme-challenge domain_id challenges_path]
                         [--update domain_id resource_id] [--ip IP]
                         [--ip-method {http,socket,netifaces}]
                         [--interface INTERFACE]
@@ -31,6 +32,9 @@ lindyndns is a simple dynamic dns client for Linode. The official one is a bit l
       --list-domains        List all domains and their IDs
       --list-dom-resources domain_id
                             List resources for a given domain ID
+      --acme-challenge domain_id challenges_path
+                            Read the given JSON file following the format in
+                            acmebotdocumentation and make appropriate TXT records
       --update domain_id resource_id
                             Update DNS in this record
       --ip IP, --value IP   Update ip to this. Default is auto.
@@ -39,3 +43,4 @@ lindyndns is a simple dynamic dns client for Linode. The official one is a bit l
       --interface INTERFACE
                             Interface to use to get ip address. Only relevant to
                             socket/netifaces methods.
+
