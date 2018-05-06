@@ -15,19 +15,22 @@ for f in secrets_files:
 else:
     api_key = None
 
-API_URL = 'https://api.linode.com/'
 
+API_URL = 'https://api.linode.com/v4'
 
-def request(action, data={}, *args, **kwargs):
-    send_data = {
-        'api_key': api_key,
-        'api_action': action
-    }
-    send_data.update(data)
-    ret = requests.post(API_URL, send_data, *args, **kwargs).json()
-    if len(ret['ERRORARRAY']) > 0:
-        raise RequestException('API error: {!s}'.format(ret['ERRORARRAY']),
-                               data=ret['ERRORARRAY'])
+def request(method, endpoint, send_data={}, *args, **kwargs):
+    headers = {'Authorization': f'Bearer {api_key}'}
+    if send_data:
+        headers['Content-Type'] = 'application/json'
+        kwargs['json'] = send_data
+
+    ret = requests.request(method, API_URL + endpoint, headers=headers,
+                        *args, **kwargs).json()
+    if 'errors' in ret:
+        raise RequestException(
+            'API error: {!s}'.format(ret['errors']),
+            data=ret['errors']
+        )
     return ret
 
 
@@ -76,16 +79,21 @@ class RequestException(LinodeException):
 
 
 class Domain:
-    def __init__(self, domain_id, name):
+    def __init__(self, id, domain, **kwargs):
         """
         Make an API domain abstraction
 
         Params:
-        domain_id -- linode-assigned id for this domain
-        name -- name of the domain
+        id -- linode-assigned id for this domain
+        domain -- name of the domain
+
+        Keyword parameters:
+        Directly assigned into self.data, so this can be used with the
+        **-operator with data from the API
         """
-        self.domain_id = domain_id
-        self.name = name
+        self.domain_id = int(id)
+        self.name = domain
+        self.data = kwargs
 
     def __repr__(self):
         return '{d.__class__.__name__}({d.domain_id!r}, ' \
@@ -103,36 +111,34 @@ class Domain:
         """
         List domains viewable by the user whose api key is in use
         """
-        data = request('domain.list')['DATA']
-        domains = []
-
-        for dom in data:
-            domains.append(Domain(dom['DOMAINID'], dom['DOMAIN']))
+        data = request('GET', '/domains')['data']
+        domains = [Domain(**dom) for dom in data]
 
         return domains
 
 
 class Resource:
-    def __init__(self, name, res_type, target, resource_id=None,
-                 domain_id=None, ttl=None, **kwargs):
+    def __init__(self, name, type, target, id=None,
+                 domain_id=None, ttl_sec=None, **kwargs):
         """
         Make an API resource abstraction
 
         Params:
         name -- name of resource
-        res_type -- dns record name
+        type -- dns record type
         target -- response for this resource (e.g. ip address)
-        resource_id -- ID for this resource if it was fetched from the API
+        id -- ID for this resource if it was fetched from the API
         domain_id -- domain this is attached to
-        ttl -- ttl for this resource
+        ttl_sec -- ttl for this resource
         """
         self.name = name
         # uppercase because api seems to return random case
-        self.res_type = res_type.upper()
+        self.res_type = type.upper()
         self.target = target
-        self.resource_id = resource_id
+        self.resource_id = id
         self.domain_id = domain_id
-        self.ttl = ttl
+        self.ttl = ttl_sec
+        self.data = kwargs
 
     def __repr__(self):
         return '{r.__class__.__name__}({r.name!r}, {r.res_type!r}, ' \
@@ -143,45 +149,39 @@ class Resource:
         """
         Send the current version of this Resource to Linode to update it
         """
-        translation = {
-            'name': 'Name',
-            'resource_id': 'ResourceID',
-            'domain_id': 'DomainID',
-            'target': 'Target',
-            'ttl': 'TTL_sec',
-            'res_type': 'Type'
+        ok_fields = {
+            'id',
+            'type',
+            'name',
+            'target',
+            'priority',
+            'weight',
+            'port',
+            'service',
+            'protocol',
+            'tag',
+            'ttl_sec',
         }
-        request('domain.resource.update',
-                {translation.get(x, x): y for x, y in self.__dict__.items()})
+        data = self.__dict__.copy()
+        data.update(data['data'])
+        data = {k: v for (k, v) in data.items() if k in ok_fields and v}
+        return request('PUT', f'/domains/{self.domain_id}/records/{self.resource_id}', send_data=data)
+
+    def delete(self):
+        """
+        Delete this record from Linode servers
+        """
+        return request('DELETE', f'/domains/{self.domain_id}/records/{self.resource_id}')
 
     @classmethod
     def get(cls, domain_id, resource_id=None):
         """
         Pull resource data for a domain or specific resource
         """
-        req_body = {'DomainID': domain_id}
-        if resource_id:
-            req_body.update({'ResourceID': resource_id})
+        endpoint = f'/domains/{domain_id}/records/{resource_id}' if resource_id else f'/domains/{domain_id}/records'
 
-        data = request('domain.resource.list',
-                       req_body)['DATA']
-        return [cls.from_api_format(res) for res in data]
-
-    @staticmethod
-    def from_api_format(data):
-        """
-        Take a resource, from the api, in unserialized JSON, convert to
-        a Resource
-        """
-        translation = {
-            'NAME': 'name',
-            'RESOURCEID': 'resource_id',
-            'DOMAINID': 'domain_id',
-            'TARGET': 'target',
-            'TTL_SEC': 'ttl',
-            'TYPE': 'res_type'
-        }
-        return Resource(**{translation.get(x, x): y for x, y in data.items()})
+        data = request('GET', endpoint)['data']
+        return [Resource(domain_id=domain_id, **res) for res in data]
 
 
 def main():
@@ -197,8 +197,8 @@ def main():
                     help='List resources for a given domain ID')
     ap.add_argument('--update', nargs=2, metavar=('domain_id', 'resource_id'),
                     type=int, help='Update DNS in this record')
-    ap.add_argument('--ip', default='auto', help='Update ip to this. '
-                                                 'Default is auto.')
+    ap.add_argument('--ip', '--value', default='auto', help='Update ip to this. '
+                                                            'Default is auto.')
     ap.add_argument('--ip-method', choices=('http', 'socket', 'netifaces'),
                     default='http', help='Method to get IP address')
     ap.add_argument('--interface', help='Interface to use to get ip address. '
@@ -221,6 +221,8 @@ def main():
     elif args.list_dom_resources:
         pprint(Domain(args.list_dom_resources, '').resources)
         exit(0)
+    elif args.set:
+        pass
     elif args.update:
         if args.ip == 'auto':
             ip_addr = get_ip(method=args.ip_method, ifname=args.interface)

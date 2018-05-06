@@ -21,20 +21,21 @@ lindyndns is a simple dynamic dns client for Linode. The official one is a bit l
 
     usage: lindyndns.py [-h] [--list-domains] [--list-dom-resources domain_id]
                         [--update domain_id resource_id] [--ip IP]
-                        [--ip-method {http,socket}] [--interface INTERFACE]
+                        [--ip-method {http,socket,netifaces}]
+                        [--interface INTERFACE]
 
     Simple Linode DNS API client for dynamic dns
 
     optional arguments:
       -h, --help            show this help message and exit
-      --list-domains         List all domains and their IDs
+      --list-domains        List all domains and their IDs
       --list-dom-resources domain_id
                             List resources for a given domain ID
       --update domain_id resource_id
                             Update DNS in this record
-      --ip IP               Update ip to this. Default is auto.
-      --ip-method {http,socket}
+      --ip IP, --value IP   Update ip to this. Default is auto.
+      --ip-method {http,socket,netifaces}
                             Method to get IP address
       --interface INTERFACE
-                            Interface to use to get ip address.Only relevant to
-                            socket method.
+                            Interface to use to get ip address. Only relevant to
+                            socket/netifaces methods.
