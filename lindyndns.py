@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 import requests
 import json
+import logging
 import sys
 
 secrets_files = ('./lindyndns.apikey', '/etc/lindyndns.apikey')
-# find an api key, error out if the user forgot to make a file with one
 for f in secrets_files:
     try:
         with open(f) as h:
@@ -16,6 +16,25 @@ else:
     api_key = None
 
 
+APP_NAME = 'lindyndns'
+
+log = logging.getLogger(APP_NAME)
+
+fmt = logging.Formatter(
+    '{asctime} {levelname} {filename}:{lineno}: {message}',
+    datefmt='%b %d %H:%M:%S',
+    style='{'
+)
+# don't add handlers repeatedly when I use autoreload
+for handler in log.handlers:
+    if isinstance(handler, logging.StreamHandler):
+        break
+else:
+    hnd = logging.StreamHandler(sys.stderr)
+    hnd.setFormatter(fmt)
+    log.addHandler(hnd)
+
+
 API_URL = 'https://api.linode.com/v4'
 
 
@@ -25,8 +44,10 @@ def request(method, endpoint, send_data={}, *args, **kwargs):
         headers['Content-Type'] = 'application/json'
         kwargs['json'] = send_data
 
+    log.debug('Requesting %r', endpoint)
     ret = requests.request(method, API_URL + endpoint, headers=headers,
                         *args, **kwargs).json()
+    log.debug('Got %r', ret)
     if 'errors' in ret:
         raise RequestException(
             'API error: {!s}'.format(ret['errors']),
@@ -124,23 +145,24 @@ class Domain:
         Returns:
         The resource given with all parameters filled from online
         """
-        print('=====create_resource======')
         data = res._convert_to_wire_format()
-        print(data)
+        log.debug('Creating resource %r', data)
         filled_res = request('POST', f'/domains/{self.domain_id}/records', send_data=data)
-        print(filled_res)
+        log.debug('Filled version: %r', filled_res)
         return Resource(domain_id=self.domain_id, **filled_res)
 
     def __repr__(self):
         return '{d.__class__.__name__}({d.domain_id!r}, ' \
                '{d.name!r})'.format(d=self)
 
-    @property
     def resources(self):
         """
         List resources for a domain
         """
-        return Resource.get(self.domain_id)
+        endpoint = f'/domains/{self.domain_id}/records'
+
+        data = request('GET', endpoint)['data']
+        return [Resource(domain_id=self.domain_id, **res) for res in data]
 
     @staticmethod
     def list():
@@ -215,20 +237,20 @@ class Resource:
         return request('DELETE', f'/domains/{self.domain_id}/records/{self.resource_id}')
 
     @classmethod
-    def get(cls, domain_id, resource_id=None):
+    def get(cls, domain_id, resource_id):
         """
-        Pull resource data for a domain or specific resource
+        Pull resource data for a specific resource
         """
-        endpoint = f'/domains/{domain_id}/records/{resource_id}' if resource_id else f'/domains/{domain_id}/records'
+        endpoint = f'/domains/{domain_id}/records/{resource_id}'
 
-        data = request('GET', endpoint)['data']
-        return [Resource(domain_id=domain_id, **res) for res in data]
+        res = request('GET', endpoint)
+        return Resource(domain_id=domain_id, **res)
 
 
-def main():
+def main(in_args=sys.argv[1:]):
     import argparse
     import sys
-    from pprint import pprint
+    from pprint import pprint, pformat
     ap = argparse.ArgumentParser(
         description='Simple Linode DNS API client for dynamic dns'
     )
@@ -251,51 +273,49 @@ def main():
                     default='http', help='Method to get IP address')
     ap.add_argument('--interface', help='Interface to use to get ip address. '
                     'Only relevant to socket/netifaces methods.')
+    ap.add_argument('--log-level', help='Log level to use (default: INFO)',
+                    default='INFO')
 
-    if not (len(sys.argv) > 1):
-        ap.print_help()
-        exit(1)
+    args = ap.parse_args(in_args)
 
-    args = ap.parse_args()
+    log.setLevel(args.log_level)
 
     if not api_key:
-        print('Please create one of', secrets_files, ' with the contents of '
-              'your linode API key.')
+        log.error('Please create one of %s with the contents of '
+                  'your linode API key.', secrets_files)
         exit(1)
 
     if args.list_domains:
         pprint(Domain.list())
         exit(0)
     elif args.list_dom_resources:
-        pprint(Domain(args.list_dom_resources, '').resources)
+        pprint(Domain(args.list_dom_resources, '').resources())
         exit(0)
     elif args.acme_challenge:
         dom_id = int(args.acme_challenge[0])
         challenges_file = args.acme_challenge[1]
 
         dom = Domain(dom_id, '')
-        existing_resources = [res for res in Resource.get(dom_id) if res.name.startswith('_acme-challenge')]
-        print('Removing existing records:')
-        pprint(existing_resources)
+        existing_resources = [res for res in dom.resources() if res.name.startswith('_acme-challenge')]
+        log.info('Removing existing records: %s', pformat(existing_resources))
         for res in existing_resources:
             res.delete()
         with open(challenges_file) as h:
             records = generate_acme_challenge_records(json.load(h))
-        pprint(records)
+        log.info('Generated records: %s', pformat(records))
         resources = [dom.create_resource(rec) for rec in records]
-        pprint(resources)
+        log.info('Linode now has %s', pformat(resources))
         exit(0)
     elif args.update:
         if args.ip == 'auto':
             ip_addr = get_ip(method=args.ip_method, ifname=args.interface)
         else:
             ip_addr = args.ip
-        print('Updating dynamic dns to', ip_addr)
-        res = Resource.get(args.update[0], args.update[1])[0]
-        print('Currently', res)
+        log.info('Updating dynamic dns to %s', ip_addr)
+        res = Resource.get(args.update[0], args.update[1])
+        log.info('Currently %r', res)
         res.target = ip_addr
-        print('Will be', res)
-        print('Updating...')
+        log.info('Will be %r', res)
         res.update()
         exit(0)
 
